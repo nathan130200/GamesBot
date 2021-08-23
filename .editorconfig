@@ -1,0 +1,5 @@
+﻿[*.{cs,vb}]
+dotnet_style_qualification_for_field=false:silent
+dotnet_style_qualification_for_property=true:silent
+dotnet_style_qualification_for_method=true:silent
+dotnet_style_qualification_for_event=true:silent

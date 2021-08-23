@@ -1,0 +1,343 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using DSharpPlus;
+using DSharpPlus.CommandsNext;
+using DSharpPlus.CommandsNext.Attributes;
+using DSharpPlus.Entities;
+using DSharpPlus.EventArgs;
+
+namespace Games.Modules.Games
+{
+    public class TicTacToe : BaseCommandModule
+    {
+        static readonly Dictionary<int, DiscordEmoji> NumbersMapping;
+        static readonly Dictionary<DiscordEmoji, int> NumbersMappingReversed;
+
+        static TicTacToe()
+        {
+            NumbersMapping = new()
+            {
+                [1] = Util.Emoji(":one:"),
+                [2] = Util.Emoji(":two:"),
+                [3] = Util.Emoji(":three:"),
+                [4] = Util.Emoji(":four:"),
+                [5] = Util.Emoji(":five:"),
+                [6] = Util.Emoji(":six:"),
+                [7] = Util.Emoji(":seven:"),
+                [8] = Util.Emoji(":eight:"),
+                [9] = Util.Emoji(":nine:"),
+            };
+
+            NumbersMappingReversed = NumbersMapping.ToDictionary(x => x.Value, x => x.Key);
+        }
+
+
+        [Command("tictactoe"), Aliases("ttt")]
+        public async Task Invoke(CommandContext ctx, DiscordUser user = default)
+        {
+            if (user == null)
+                user = ctx.Client.CurrentUser;
+            else
+            {
+                if (user.IsBot && user != ctx.Client.CurrentUser)
+                {
+                    await ctx.RespondAsync($"{ctx.User.Mention} :x: Outros bots não podem jogar.");
+                    return;
+                }
+            }
+
+            var game = new Game(ctx, ctx.User, user);
+            var result = await game.PlayAsync();
+
+            if (result == GameResult.Draw)
+            {
+                await ctx.RespondAsync($"{ctx.User.Mention} :frowning2: Empate!");
+                return;
+            }
+
+            if (!game.IsVersusBot)
+            {
+                var part = result == GameResult.Player1 ? "Voce" : user.Mention;
+                var sub = result == GameResult.Player1 ? "venceu" : "venci";
+                await ctx.RespondAsync($"{ctx.User.Mention} :tada: {part} {sub}!");
+            }
+            else
+            {
+                var part = result == GameResult.Player1 ? "Você" : "Eu";
+                var emoji = result == GameResult.Player1 ? ":yawning_face:" : ":sunglasses:";
+                await ctx.RespondAsync($"{ctx.User.Mention} {emoji} {part} venceu!");
+            }
+        }
+
+        public enum GameResult
+        {
+            Player1,
+            Player2,
+            Draw,
+            Timeout
+        }
+
+        public class Game
+        {
+            public enum Actor
+            {
+                None,
+                Player1,
+                Player2
+            }
+
+            static readonly DiscordEmoji P1 = Util.Emoji(":x:");
+            static readonly DiscordEmoji P2 = Util.Emoji(":o:");
+
+            private string _id;
+            private TaskCompletionSource<GameResult> _tsc;
+            private DiscordMessage _msg;
+
+            public string Id { get; } = Util.NextGameId();
+            public bool IsVersusBot { get; }
+            public DiscordUser Player1 { get; private set; }
+            public DiscordUser Player2 { get; private set; }
+            public char[] Table { get; }
+            private CommandContext ctx;
+
+            public Game(CommandContext context, DiscordUser player1, DiscordUser player2 = default)
+            {
+                this.ctx = context;
+                this.Player1 = player1;
+                this.Player2 = player2;
+                this.IsVersusBot = this.Player2.IsBot;
+                this.Table = Enumerable.Repeat(NONE, 9).ToArray();
+            }
+
+            public bool CanMove()
+                => this.Table.Any(x => x == NONE);
+
+            public bool IsEmpty(int index)
+                => this.Table[index] == NONE;
+
+            public async Task<GameResult> PlayAsync()
+            {
+                var client = this.ctx.Client;
+                this._tsc = new TaskCompletionSource<GameResult>();
+                this._msg = await this.ctx.RespondAsync($"{this.ctx.User.Mention} Iniciando jogo...");
+                await this.UpdateMessage();
+                client.MessageReactionAdded += this.HandleMessageReactionCreated;
+
+                return await this._tsc.Task;
+            }
+
+            DiscordEmbedBuilder GetEmbed()
+            {
+                var s = string.Empty;
+
+                for (int i = 0; i < Table.Length; i++)
+                {
+                    s += " ";
+                    s += Table[i] == ' ' ? NumbersMapping[i + 1].ToString() : (Table[i] == PLAYER_1 ? P1 : P2);
+                    s += " ";
+
+                    if ((i + 1) % 3 == 0)
+                        s += "\n";
+                }
+
+                return new DiscordEmbedBuilder
+                {
+                    Description = s,
+                    Color = !ended ? (
+                    currentPlayer == 0
+                        ? DiscordColor.CornflowerBlue
+                        : DiscordColor.IndianRed
+                    ) : DiscordColor.Black
+                };
+            }
+
+            bool once = false;
+
+            async Task UpdateMessage(bool cleanup = false)
+            {
+                var chn = this._msg.Channel;
+
+                if (cleanup)
+                {
+                    _ = this._msg.DeleteAsync();
+                    this._msg = await chn.SendMessageAsync($"{this.Player1.Mention} vs. {this.Player2.Mention}", embed: this.GetEmbed().Build());
+                }
+                else
+                {
+                    this._msg = await this._msg.ModifyAsync(null, embed: this.GetEmbed().Build());
+                }
+
+                var tasks = new List<Task>();
+
+                if (cleanup || !once)
+                {
+                    foreach (var (pos, emoji) in NumbersMapping)
+                    {
+                        var at = this.Table[pos - 1];
+
+                        if (at == ' ')
+                            tasks.Add(_msg.CreateReactionAsync(emoji));
+                    }
+
+                    once = true;
+                }
+
+                try
+                {
+                    await Task.WhenAll(tasks).ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
+                }
+                catch { }
+            }
+
+            int RandomChoice()
+            {
+                var rnd = new Random(Environment.TickCount);
+                int pos;
+
+                while (true)
+                {
+                    pos = rnd.Next(0, this.Table.Length - 1);
+
+                    if (IsEmpty(pos))
+                        break;
+                }
+
+                this.Table[pos] = PLAYER_2;
+
+                return pos;
+            }
+
+            bool IsValidReaction(MessageReactionAddEventArgs evt, out int index)
+            {
+                index = -1;
+
+                var emoji = evt.Emoji;
+
+                if (this._msg.Id != evt.Message.Id)
+                    return false;
+
+                if ((this.currentPlayer == 0 && evt.User == this.Player1) ||
+                    (evt.User == this.Player2 && this.currentPlayer == 1))
+                {
+                    try
+                    {
+                        index = NumbersMappingReversed.FirstOrDefault(x => x.Key.Equals(emoji)).Value - 1;
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+
+                return false;
+            }
+
+            char currentPlayer = PLAYER_1;
+
+            static readonly int[][] WINNER_SPOTS = new int[][]
+            {
+                new[]{0,1,2},
+                new[]{3,4,5},
+                new[]{6,7,8},
+
+                new[]{0,3,6},
+                new[]{1,4,7},
+                new[]{2,5,8},
+
+                new[]{0,4,8},
+                new[]{2,4,6},
+            };
+
+            bool ended = false;
+
+            bool CurrentPlayerHasWon()
+            {
+                var was_won = false;
+
+                foreach (var spot in WINNER_SPOTS)
+                {
+                    var match = Table[spot[0]] == currentPlayer
+                        && Table[spot[1]] == currentPlayer
+                        && Table[spot[2]] == currentPlayer;
+
+                    if (match)
+                    {
+                        ended = was_won = true;
+                        break;
+                    }
+                }
+
+                return was_won;
+            }
+
+            bool Continue()
+            {
+                if (CurrentPlayerHasWon())
+                {
+                    _tsc.TrySetResult(currentPlayer == PLAYER_1 ? GameResult.Player1 : GameResult.Player2);
+                    ctx.Client.MessageReactionAdded -= HandleMessageReactionCreated;
+                    return false;
+                }
+
+                if (!CanMove())
+                {
+                    _tsc.TrySetResult(GameResult.Draw);
+                    ctx.Client.MessageReactionAdded -= HandleMessageReactionCreated;
+                    return false;
+                }
+
+                return true;
+            }
+
+            async Task HandleMessageReactionCreated(DiscordClient sender, MessageReactionAddEventArgs e)
+            {
+                if (e.User.IsBot && !e.User.IsCurrent)
+                    return;
+
+                if (!this.IsValidReaction(e, out var index))
+                    return;
+                else
+                {
+                    e.Handled = true;
+                    await e.Message.DeleteReactionAsync(e.Emoji, e.User);
+
+                    if (!this.IsEmpty(index))
+                    {
+                        await this.ctx.RespondAsync($"{e.User.Mention} :unamused: Posição já ocupada!");
+                        return;
+                    }
+
+                    this.Table[index] = currentPlayer;
+                    await UpdateMessage();
+
+                    _ = e.Message.DeleteReactionsEmojiAsync(e.Emoji);
+
+                    if (!Continue())
+                        return;
+
+                    if (currentPlayer == PLAYER_1) currentPlayer = PLAYER_2;
+                    else currentPlayer = PLAYER_1;
+                    await UpdateMessage();
+
+
+                    if (IsVersusBot && currentPlayer == 1)
+                    {
+                        var choice = RandomChoice();
+                        await _msg.DeleteReactionsEmojiAsync(NumbersMapping[choice + 1]);
+                        await UpdateMessage();
+
+                        if (!Continue())
+                            return;
+
+                        await Task.Delay(1500);
+                        currentPlayer = PLAYER_1;
+                        await UpdateMessage();
+                    }
+                }
+            }
+        }
+    }
+}
