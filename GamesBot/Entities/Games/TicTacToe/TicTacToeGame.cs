@@ -9,34 +9,6 @@ using DSharpPlus.EventArgs;
 
 namespace Games.Entities.Games.TicTacToe
 {
-    public enum SpotType
-    {
-        Horizontal = 1,
-        Vertical = 2,
-        Diagonal = 3
-    }
-
-    [DebuggerDisplay("Type: {Type}; {ToString(),nq}")]
-    public class Spot
-    {
-        public SpotType Type { get; }
-        public int[] Data { get; }
-
-        public Spot(SpotType type, int[] buffer)
-        {
-            this.Type = type;
-            this.Data = buffer;
-        }
-
-        public int this[int index]
-            => Data[index];
-
-        public override string ToString()
-        {
-            return $"{Data[0]},{Data[1]},{Data[2]}";
-        }
-    }
-
     public class TicTacToeGame : BaseGame<TicTacToeGameResult>
     {
         private string id;
@@ -45,39 +17,25 @@ namespace Games.Entities.Games.TicTacToe
         private DiscordClient client;
         private DiscordUser player1;
         private DiscordUser player2;
-        private Actor[] table;
-        private Actor currentActor;
+        private SpotOwner[] table;
+        private SpotOwner currentActor;
         private TaskCompletionSource<TicTacToeGameResult> tsc;
         private TicTacToeGameResult result;
         private int round = 1;
 
-        public void Dispose()
+        public override void Dispose()
         {
             chn = null;
             client = null;
             msg = null;
             player1 = player2 = null;
             table = null;
-            currentActor = Actor.None;
+            currentActor = SpotOwner.None;
             tsc = null;
             result = default;
             round = -1;
             GC.Collect();
         }
-
-        static readonly Spot[] WinnerSpots = new Spot[]
-        {
-            new(SpotType.Horizontal, new []{0, 1, 2 }),
-            new(SpotType.Horizontal, new []{3, 4, 5 }),
-            new(SpotType.Horizontal, new []{6, 7, 8 }),
-
-            new(SpotType.Vertical, new []{0, 3, 6 }),
-            new(SpotType.Vertical, new []{1, 4, 7 }),
-            new(SpotType.Vertical, new []{2, 5, 8 }),
-
-            new(SpotType.Diagonal, new []{0, 4, 8 }),
-            new(SpotType.Diagonal, new []{2, 4, 6 }),
-        };
 
         public TicTacToeGame(DiscordClient c, DiscordChannel channel, DiscordUser user1, DiscordUser user2) : base(BaseGameType.TicTacToe)
         {
@@ -86,8 +44,8 @@ namespace Games.Entities.Games.TicTacToe
             chn = channel;
             player1 = user1;
             player2 = user2;
-            table = Enumerable.Repeat(Actor.None, 9).ToArray();
-            currentActor = Actor.Player1;
+            table = Enumerable.Repeat(SpotOwner.None, 9).ToArray();
+            currentActor = SpotOwner.Player1;
             tsc = new TaskCompletionSource<TicTacToeGameResult>();
         }
 
@@ -104,13 +62,13 @@ namespace Games.Entities.Games.TicTacToe
 
         bool CanInteract(DiscordUser other)
         {
-            if (currentActor == Actor.Player2 && IsVersusBot)
+            if (currentActor == SpotOwner.Player2 && IsVersusBot)
                 return true;
 
-            if (currentActor == Actor.Player1 && player1 != other)
+            if (currentActor == SpotOwner.Player1 && player1 != other)
                 return false;
 
-            if (currentActor == Actor.Player2 && player2 != other)
+            if (currentActor == SpotOwner.Player2 && player2 != other)
                 return false;
 
             return true;
@@ -127,7 +85,7 @@ namespace Games.Entities.Games.TicTacToe
             {
                 position = Rnd.Next(0, table.Length - 1);
 
-                if (table[position] == Actor.None)
+                if (table[position] == SpotOwner.None)
                     break;
             }
 
@@ -138,44 +96,19 @@ namespace Games.Entities.Games.TicTacToe
 
         bool IsEmptySpot(Spot s)
         {
-            return table[s[0]] == Actor.None
-                && table[s[1]] == Actor.None
-                && table[s[2]] == Actor.None;
+            return table[s[0]] == SpotOwner.None
+                && table[s[1]] == SpotOwner.None
+                && table[s[2]] == SpotOwner.None;
         }
 
         bool CanBotUseSpot(Spot s, out int result)
         {
             result = -1;
 
-            //return (table[s[0]] == Actor.None
-            //    || table[s[1]] == Actor.None
-            //    || table[s[2]] == Actor.None)
-
-            //    ||
-
-            //    (table[s[0]] == Actor.Player2
-            //    || table[s[1]] == Actor.Player2
-            //    || table[s[2]] == Actor.Player2);
-
             if (s == null)
                 return false;
 
-            return s.Data.Any(x => table[x] == Actor.None);
-
-            //foreach (var pos in s.Data)
-            //{
-            //    if (table[pos] == Actor.None
-            //        || table[pos] == Actor.Player2)
-            //    {
-            //        if (table[pos] == Actor.None)
-            //        {
-            //            result = pos;
-            //            return true;
-            //        }
-            //    }
-            //}
-
-            //return false;
+            return s.Data.Any(x => table[x] == SpotOwner.None);
         }
 
         static IEnumerable<Spot> FindNeighbourSpots(int pos)
@@ -184,7 +117,7 @@ namespace Games.Entities.Games.TicTacToe
 
             var result = new List<Spot>();
 
-            foreach (var spot in WinnerSpots)
+            foreach (var spot in Spot.Values)
             {
                 if (spot.Data.Any(x => x == pos))
                 {
@@ -206,19 +139,19 @@ namespace Games.Entities.Games.TicTacToe
             Debug.WriteLine("* test spot");
 
             foreach (var item in FindNeighbourSpots(lastPlayerGuess)
-                .Where(x => x.Data.Count(i => table[i] == Actor.None) != 0))
+                .Where(x => x.Data.Count(i => table[i] == SpotOwner.None) != 0))
             {
                 Debug.WriteLine("* found neighbour spot: {0} (type: {1})",
                     item, item.Type);
 
-                var len = item.Data.Count(n => table[n] == Actor.Player1);
+                var len = item.Data.Count(n => table[n] == SpotOwner.Player1);
 
                 if (len > 1)
                 {
                     if (len == 2)
                     {
                         Debug.WriteLine("** neighbour spot is valid to blocking the player");
-                        return item.Data.FirstOrDefault(x => table[x] == Actor.None);
+                        return item.Data.FirstOrDefault(x => table[x] == SpotOwner.None);
                     }
                     else
                     {
@@ -228,12 +161,12 @@ namespace Games.Entities.Games.TicTacToe
 
                         while (true)
                         {
-                            if (!item.Data.Any(x => table[x] == Actor.None))
+                            if (!item.Data.Any(x => table[x] == SpotOwner.None))
                                 break;
 
                             pos = rnd.Next(0, item.Data.Length);
                             
-                            if (table[pos] == Actor.None)
+                            if (table[pos] == SpotOwner.None)
                                 return pos;
                         }
 
@@ -245,7 +178,7 @@ namespace Games.Entities.Games.TicTacToe
         test:
             if (winGuess == null)
             {
-                winGuess = WinnerSpots.FirstOrDefault(x => IsEmptySpot(x));
+                winGuess = Spot.Values.FirstOrDefault(x => IsEmptySpot(x));
                 Debug.WriteLine("@ initial random guess spot");
                 goto test;
             }
@@ -260,7 +193,7 @@ namespace Games.Entities.Games.TicTacToe
                     if (step == 0)
                     {
                         step++;
-                        winGuess = WinnerSpots.FirstOrDefault(x => IsEmptySpot(x));
+                        winGuess = Spot.Values.FirstOrDefault(x => IsEmptySpot(x));
                         Debug.WriteLine("@ shuffle guess spot ");
                         goto test;
                     }
@@ -277,7 +210,7 @@ namespace Games.Entities.Games.TicTacToe
         {
             bool completed = false;
 
-            foreach (var spot in WinnerSpots)
+            foreach (var spot in Spot.Values)
             {
                 completed = table[spot[0]] == currentActor
                     && table[spot[1]] == currentActor
@@ -288,14 +221,14 @@ namespace Games.Entities.Games.TicTacToe
             }
 
             if (completed)
-                SetResult(currentActor == Actor.Player1 ? TicTacToeGameResult.Player1 : TicTacToeGameResult.Player2);
+                SetResult(currentActor == SpotOwner.Player1 ? TicTacToeGameResult.Player1 : TicTacToeGameResult.Player2);
 
             return completed;
         }
 
         bool CanMove(bool finish = true)
         {
-            var result = table.Any(x => x == Actor.None);
+            var result = table.Any(x => x == SpotOwner.None);
 
             if (!result && finish)
                 SetResult(TicTacToeGameResult.Draw);
@@ -346,20 +279,16 @@ namespace Games.Entities.Games.TicTacToe
 
                 var option = int.Parse(itr.Data.CustomId.Replace("ttt_action_", string.Empty));
                 table[option] = currentActor;
-                //await UpdateAsync();
 
                 if (IsGameEnded())
                     return;
 
-                if (currentActor == Actor.Player1)
-                    currentActor = Actor.Player2;
+                if (currentActor == SpotOwner.Player1)
+                    currentActor = SpotOwner.Player2;
                 else
-                    currentActor = Actor.Player1;
+                    currentActor = SpotOwner.Player1;
 
-                //if (!IsVersusBot)
-                //    await UpdateAsync();
-
-                if (currentActor == Actor.Player2 && IsVersusBot)
+                if (currentActor == SpotOwner.Player2 && IsVersusBot)
                 {
                     lastPlayerGuess = option;
 
@@ -368,12 +297,12 @@ namespace Games.Entities.Games.TicTacToe
                     if (choice == -1)
                         choice = MakeGuess();
 
-                    table[choice] = Actor.Player2;
+                    table[choice] = SpotOwner.Player2;
 
                     if (IsGameEnded())
                         return;
 
-                    currentActor = Actor.Player1;
+                    currentActor = SpotOwner.Player1;
                     round++;
                 }
 
@@ -406,7 +335,7 @@ namespace Games.Entities.Games.TicTacToe
                     .WithFooter("Iniciado Em ")
                     .WithTimestamp(startTime)
                     .AddField("Rodadas", round.ToString(), true)
-                    .AddField("Jogador Atual", currentActor == Actor.Player1
+                    .AddField("Jogador Atual", currentActor == SpotOwner.Player1
                         ? player1.Mention : player2.Mention, true)
                     .WithColor(DiscordColor.SpringGreen);
             }
@@ -433,7 +362,7 @@ namespace Games.Entities.Games.TicTacToe
                 if (result == TicTacToeGameResult.Draw)
                     embed.AddField("Vencedor", "**EMPATE**");
                 else
-                    embed.AddField("Vencedor", currentActor == Actor.Player1
+                    embed.AddField("Vencedor", currentActor == SpotOwner.Player1
                         ? player1.Mention : player2.Mention);
             }
 
@@ -457,22 +386,22 @@ namespace Games.Entities.Games.TicTacToe
                     AppendRow(ref rows, ref count, ref buttons);
                     DSharpPlus.ButtonStyle style;
 
-                    if (actor == Actor.None)
+                    if (actor == SpotOwner.None)
                         style = DSharpPlus.ButtonStyle.Secondary;
                     else
                     {
-                        if (actor == Actor.Player1)
+                        if (actor == SpotOwner.Player1)
                             style = DSharpPlus.ButtonStyle.Primary;
                         else
                             style = DSharpPlus.ButtonStyle.Danger;
                     }
 
-                    var label = actor == Actor.None ? (i + 1).ToString()
-                        : (actor == Actor.Player1 ? "X" : "O");
+                    var label = actor == SpotOwner.None ? (i + 1).ToString()
+                        : (actor == SpotOwner.Player1 ? "X" : "O");
 
-                    var suffix = actor != Actor.None ? "_disabled" : string.Empty;
+                    var suffix = actor != SpotOwner.None ? "_disabled" : string.Empty;
                     buttons[i % 3] = new DiscordButtonComponent(style, $"ttt_action_{i}{suffix}",
-                        label, actor != Actor.None);
+                        label, actor != SpotOwner.None);
 
                     count++;
                 }
@@ -503,6 +432,6 @@ namespace Games.Entities.Games.TicTacToe
             => this.player2.IsBot && this.player2.IsCurrent;
 
         public bool HasMovements()
-            => this.table.Any(x => x == Actor.None);
+            => this.table.Any(x => x == SpotOwner.None);
     }
 }

@@ -1,6 +1,6 @@
 ﻿namespace Games.Entities.Games.TicTacToe
 {
-    public enum Actor
+    public enum SpotOwner
     {
         None,
         Player1,
