@@ -24,7 +24,13 @@ namespace Games.Modules
             }
 
             using (var ttt = new TicTacToeGame(ctx.Client, ctx.Channel, ctx.User, user))
-                await ttt.StartAsync();
+                await ttt.GetResultAsync();
+        }
+
+        [Command, Aliases("forca")]
+        public async Task Hangman(CommandContext ctx)
+        {
+
         }
     }
 }
