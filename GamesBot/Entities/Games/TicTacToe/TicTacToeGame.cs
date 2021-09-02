@@ -144,7 +144,10 @@ namespace Games.Entities.Games.TicTacToe
                 Debug.WriteLine("* found neighbour spot: {0} (type: {1})",
                     item, item.Type);
 
-                var len = item.Data.Count(n => table[n] == SpotOwner.Player1);
+                var once = true;
+            retest:
+                var isPlayer1 = true;
+                var len = item.Data.Count(n => table[n] == (isPlayer1 ? SpotOwner.Player1 : SpotOwner.Player2));
 
                 if (len > 1)
                 {
@@ -165,12 +168,20 @@ namespace Games.Entities.Games.TicTacToe
                                 break;
 
                             pos = rnd.Next(0, item.Data.Length);
-                            
+
                             if (table[pos] == SpotOwner.None)
                                 return pos;
                         }
+                    }
+                }
+                else
+                {
+                    isPlayer1 = false;
 
-                        return MakeGuess();
+                    if (once)
+                    {
+                        once = false;
+                        goto retest;
                     }
                 }
             }
